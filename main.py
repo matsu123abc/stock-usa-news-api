@@ -4,6 +4,7 @@ import requests
 import os
 import yfinance as yf
 from dotenv import load_dotenv
+from openai import AzureOpenAI
 
 load_dotenv()
 
@@ -12,6 +13,16 @@ app = FastAPI()
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 TRANSLATOR_KEY = os.getenv("TRANSLATOR_KEY")
 TRANSLATOR_ENDPOINT = os.getenv("TRANSLATOR_ENDPOINT")
+
+AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_KEY,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_version="2024-02-01"
+)
 
 
 # -----------------------------
@@ -35,7 +46,6 @@ def get_news(keyword: str):
     def safe(v):
         return v if v is not None else ""
 
-    # top_stories
     for item in data.get("top_stories", []):
         articles.append({
             "title": safe(item.get("title")),
@@ -44,7 +54,6 @@ def get_news(keyword: str):
             "source": safe(item.get("source"))
         })
 
-    # organic_results
     for item in data.get("organic_results", []):
         articles.append({
             "title": safe(item.get("title")),
@@ -53,7 +62,6 @@ def get_news(keyword: str):
             "source": safe(item.get("source"))
         })
 
-    # news_results
     for item in data.get("news_results", []):
         articles.append({
             "title": safe(item.get("title")),
@@ -62,7 +70,6 @@ def get_news(keyword: str):
             "source": safe(item.get("source"))
         })
 
-    # ★ 5件に制限
     articles = articles[:5]
 
     return {"keyword": keyword, "count": len(articles), "articles": articles}
@@ -81,17 +88,46 @@ def translate(text: str):
         }
 
         body = [{"text": text}]
-
         base = TRANSLATOR_ENDPOINT.rstrip("/")
         url = f"{base}/translate?api-version=3.0&to=ja"
 
         res = requests.post(url, headers=headers, json=body)
-
         ja = res.json()[0]["translations"][0]["text"]
         return {"ja": ja}
 
-    except Exception as e:
+    except Exception:
         return {"ja": "翻訳エラー"}
+
+
+# -----------------------------
+# 記事URLから英語要約を生成（Azure OpenAI）
+# -----------------------------
+@app.get("/tools/summary")
+def summary(url: str):
+    prompt = f"""
+Extract the main content from the following news article URL,
+and summarize it in **5–7 lines of English** for an investor audience.
+
+- Remove ads, menus, and irrelevant text
+- Keep only the core news content
+- Output in English only
+- No bullet points, just a concise paragraph
+
+URL: {url}
+"""
+
+    try:
+        res = client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+
+        text = res.choices[0].message.content
+        return {"summary": text}
+
+    except Exception as e:
+        return {"summary": f"Summary error: {e}"}
 
 
 # -----------------------------
@@ -106,7 +142,7 @@ def stock_price(symbol: str):
 
 
 # -----------------------------
-# UI（翻訳 + 音声ボタン付き）
+# UI（翻訳 + 要約 + 音声）
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -166,7 +202,6 @@ async def home():
     <body>
         <h2>USA Stock News</h2>
 
-        <!-- ★ 銘柄ボタン一覧 -->
         <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
             <button class="ticker-btn" onclick="setTicker('NVDA')">NVIDIA</button>
             <button class="ticker-btn" onclick="setTicker('AMD')">AMD</button>
@@ -187,7 +222,6 @@ async def home():
             <button class="ticker-btn" onclick="setTicker('T')">AT&T</button>
         </div>
 
-        <!-- 手入力も残す -->
         <input id="ticker" placeholder="例: QCOM, AAPL, MSFT">
         <button onclick="search()">ニュース検索</button>
 
@@ -195,7 +229,6 @@ async def home():
 
         <script>
 
-        // ★ ボタンを押したら ticker にセットして自動検索
         function setTicker(t) {
             document.getElementById("ticker").value = t;
             search();
@@ -220,8 +253,10 @@ async def home():
 
                         <button onclick="translateText(${index})">翻訳</button>
                         <button onclick="speak(${index})">音声</button>
+                        <button onclick="showSummary(${index})">要約</button>
 
                         <div id="ja_${index}" class="ja"></div>
+                        <div id="summary_${index}" class="ja"></div>
                     </div>
                 `;
                 index++;
@@ -243,7 +278,6 @@ async def home():
             document.getElementById("ja_" + i).innerHTML = data.ja;
         }
 
-        // ★ 英語音声（Web Speech API）
         function speak(i) {
             let eng = document.getElementById("eng_" + i).innerText;
 
@@ -252,6 +286,25 @@ async def home():
             }
 
             const utter = new SpeechSynthesisUtterance(eng);
+            utter.lang = "en-US";
+            utter.rate = 1.0;
+            utter.pitch = 1.0;
+
+            speechSynthesis.speak(utter);
+        }
+
+        async function showSummary(i) {
+            const url = document.getElementById("title_" + i).href;
+
+            const api = `/tools/summary?url=` + encodeURIComponent(url);
+            const res = await fetch(api);
+            const data = await res.json();
+
+            const text = data.summary;
+
+            document.getElementById("summary_" + i).innerText = text;
+
+            const utter = new SpeechSynthesisUtterance(text);
             utter.lang = "en-US";
             utter.rate = 1.0;
             utter.pitch = 1.0;
