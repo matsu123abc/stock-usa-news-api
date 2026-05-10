@@ -76,7 +76,7 @@ def translate(text: str):
     try:
         headers = {
             "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
-            "Ocp-Apim-Subscription-Region": "japanwest",  # ★ Japan West
+            "Ocp-Apim-Subscription-Region": "japanwest",
             "Content-Type": "application/json"
         }
 
@@ -87,17 +87,10 @@ def translate(text: str):
 
         res = requests.post(url, headers=headers, json=body)
 
-        print("=== Translator Debug ===")
-        print("URL:", url)
-        print("Status:", res.status_code)
-        print("Response:", res.text)
-        print("========================")
-
         ja = res.json()[0]["translations"][0]["text"]
         return {"ja": ja}
 
     except Exception as e:
-        print("Translate error:", e)
         return {"ja": "翻訳エラー"}
 
 
@@ -113,7 +106,7 @@ def stock_price(symbol: str):
 
 
 # -----------------------------
-# UI（翻訳ボタン付き）
+# UI（翻訳 + 音声ボタン付き）
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -194,7 +187,7 @@ async def home():
             <button class="ticker-btn" onclick="setTicker('T')">AT&T</button>
         </div>
 
-        <!-- 手入力も残す（任意） -->
+        <!-- 手入力も残す -->
         <input id="ticker" placeholder="例: QCOM, AAPL, MSFT">
         <button onclick="search()">ニュース検索</button>
 
@@ -226,6 +219,8 @@ async def home():
                         <p id="eng_${index}">${n.snippet}</p>
 
                         <button onclick="translateText(${index})">翻訳</button>
+                        <button onclick="speak(${index})">音声</button>
+
                         <div id="ja_${index}" class="ja"></div>
                     </div>
                 `;
@@ -237,7 +232,6 @@ async def home():
         async function translateText(i) {
             let eng = document.getElementById("eng_" + i).innerText;
 
-            // ★ snippet が空なら title を翻訳
             if (!eng || eng.trim() === "") {
                 eng = document.getElementById("title_" + i).innerText;
             }
@@ -248,6 +242,23 @@ async def home():
 
             document.getElementById("ja_" + i).innerHTML = data.ja;
         }
+
+        // ★ 英語音声（Web Speech API）
+        function speak(i) {
+            let eng = document.getElementById("eng_" + i).innerText;
+
+            if (!eng || eng.trim() === "") {
+                eng = document.getElementById("title_" + i).innerText;
+            }
+
+            const utter = new SpeechSynthesisUtterance(eng);
+            utter.lang = "en-US";
+            utter.rate = 1.0;
+            utter.pitch = 1.0;
+
+            speechSynthesis.speak(utter);
+        }
+
         </script>
     </body>
     </html>
