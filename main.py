@@ -15,7 +15,7 @@ TRANSLATOR_ENDPOINT = os.getenv("TRANSLATOR_ENDPOINT")
 
 
 # -----------------------------
-# 英語ニュース検索 API（5件）
+# 英語ニュース検索 API（5件に制限）
 # -----------------------------
 @app.get("/tools/news")
 def get_news(keyword: str):
@@ -35,6 +35,7 @@ def get_news(keyword: str):
     def safe(v):
         return v if v is not None else ""
 
+    # top_stories
     for item in data.get("top_stories", []):
         articles.append({
             "title": safe(item.get("title")),
@@ -43,6 +44,7 @@ def get_news(keyword: str):
             "source": safe(item.get("source"))
         })
 
+    # organic_results
     for item in data.get("organic_results", []):
         articles.append({
             "title": safe(item.get("title")),
@@ -51,6 +53,7 @@ def get_news(keyword: str):
             "source": safe(item.get("source"))
         })
 
+    # news_results
     for item in data.get("news_results", []):
         articles.append({
             "title": safe(item.get("title")),
@@ -59,69 +62,58 @@ def get_news(keyword: str):
             "source": safe(item.get("source"))
         })
 
-    return {"keyword": keyword, "count": len(articles[:5]), "articles": articles[:5]}
+    # ★ 5件に制限
+    articles = articles[:5]
+
+    return {"keyword": keyword, "count": len(articles), "articles": articles}
 
 
 # -----------------------------
-# 翻訳 API
+# 翻訳 API（Azure Translator）
 # -----------------------------
 @app.get("/tools/translate")
 def translate(text: str):
     try:
         headers = {
             "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
-            "Ocp-Apim-Subscription-Region": "japanwest",
+            "Ocp-Apim-Subscription-Region": "japanwest",  # ★ Japan West
             "Content-Type": "application/json"
         }
 
         body = [{"text": text}]
+
         base = TRANSLATOR_ENDPOINT.rstrip("/")
         url = f"{base}/translate?api-version=3.0&to=ja"
 
         res = requests.post(url, headers=headers, json=body)
+
+        print("=== Translator Debug ===")
+        print("URL:", url)
+        print("Status:", res.status_code)
+        print("Response:", res.text)
+        print("========================")
+
         ja = res.json()[0]["translations"][0]["text"]
         return {"ja": ja}
 
-    except Exception:
+    except Exception as e:
+        print("Translate error:", e)
         return {"ja": "翻訳エラー"}
 
 
 # -----------------------------
-# 英語要約 API（ブラウザ音声用）
+# ストック価格 API
 # -----------------------------
-@app.post("/tools/news_summary")
-def news_summary(articles: list):
-    text_block = "\n".join([
-        f"- {a.get('title','')} {a.get('snippet','')}"
-        for a in articles
-    ])
-
-    prompt = f"""
-Summarize the following stock news in clear and concise English.
-Focus on the key points only.
-
-{text_block}
-"""
-
-    from openai import AzureOpenAI
-    client = AzureOpenAI(
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
-    )
-
-    res = client.chat.completions.create(
-        model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
-    )
-
-    summary_en = res.choices[0].message.content.strip()
-    return {"summary_en": summary_en}
+@app.get("/tools/stock_price")
+def stock_price(symbol: str):
+    ticker = yf.Ticker(symbol)
+    data = ticker.history(period="1d")
+    price = float(data["Close"].iloc[-1])
+    return {"symbol": symbol, "price": price, "currency": "USD"}
 
 
 # -----------------------------
-# UI
+# UI（翻訳ボタン付き）
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -129,16 +121,51 @@ async def home():
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
         <style>
         @media screen and (orientation: portrait) {
-            body { font-size: 22px; line-height: 1.6; padding: 20px; }
-            h2 { font-size: 26px; text-align: center; }
-            input { font-size: 22px; padding: 14px; width: 100%; }
-            button { font-size: 22px; padding: 14px; border-radius: 10px; margin-top: 10px; }
-            .ticker-btn { width: 48%; background: #e8e8e8; }
-            .card { font-size: 20px; padding: 18px; margin-top: 20px; border-radius: 12px; background: #f2f2f2; }
-            a { font-size: 22px; font-weight: bold; }
-            .ja { margin-top: 10px; padding: 10px; background: #fff7d1; border-radius: 8px; font-size: 20px; }
+            body {
+                font-size: 22px;
+                line-height: 1.6;
+                padding: 20px;
+            }
+            h2 {
+                font-size: 26px;
+                text-align: center;
+            }
+            input {
+                font-size: 22px;
+                padding: 14px;
+                width: 100%;
+            }
+            button {
+                font-size: 22px;
+                padding: 14px;
+                border-radius: 10px;
+                margin-top: 10px;
+            }
+            .ticker-btn {
+                width: 48%;
+                background: #e8e8e8;
+            }
+            .card {
+                font-size: 20px;
+                padding: 18px;
+                margin-top: 20px;
+                border-radius: 12px;
+                background: #f2f2f2;
+            }
+            a {
+                font-size: 22px;
+                font-weight: bold;
+            }
+            .ja {
+                margin-top: 10px;
+                padding: 10px;
+                background: #fff7d1;
+                border-radius: 8px;
+                font-size: 20px;
+            }
         }
         </style>
     </head>
@@ -146,6 +173,7 @@ async def home():
     <body>
         <h2>USA Stock News</h2>
 
+        <!-- ★ 銘柄ボタン一覧 -->
         <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
             <button class="ticker-btn" onclick="setTicker('NVDA')">NVIDIA</button>
             <button class="ticker-btn" onclick="setTicker('AMD')">AMD</button>
@@ -166,6 +194,7 @@ async def home():
             <button class="ticker-btn" onclick="setTicker('T')">AT&T</button>
         </div>
 
+        <!-- 手入力も残す（任意） -->
         <input id="ticker" placeholder="例: QCOM, AAPL, MSFT">
         <button onclick="search()">ニュース検索</button>
 
@@ -173,6 +202,7 @@ async def home():
 
         <script>
 
+        // ★ ボタンを押したら ticker にセットして自動検索
         function setTicker(t) {
             document.getElementById("ticker").value = t;
             search();
@@ -196,8 +226,6 @@ async def home():
                         <p id="eng_${index}">${n.snippet}</p>
 
                         <button onclick="translateText(${index})">翻訳</button>
-                        <button onclick="playVoice(${index})">🔊 英語で聞く</button>
-
                         <div id="ja_${index}" class="ja"></div>
                     </div>
                 `;
@@ -209,6 +237,7 @@ async def home():
         async function translateText(i) {
             let eng = document.getElementById("eng_" + i).innerText;
 
+            // ★ snippet が空なら title を翻訳
             if (!eng || eng.trim() === "") {
                 eng = document.getElementById("title_" + i).innerText;
             }
@@ -219,39 +248,6 @@ async def home():
 
             document.getElementById("ja_" + i).innerHTML = data.ja;
         }
-
-        async function playVoice(i) {
-            const articles = [{
-                title: document.getElementById("title_" + i).innerText,
-                snippet: document.getElementById("eng_" + i).innerText
-            }];
-
-            const res = await fetch("/tools/news_summary", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify(articles)
-            });
-
-            const data = await res.json();
-            const text = data.summary_en;
-
-            const uttr = new SpeechSynthesisUtterance(text);
-            uttr.lang = "en-US";
-            uttr.rate = 1.0;
-
-            const voices = speechSynthesis.getVoices();
-            const preferred = voices.find(v =>
-                v.lang === "en-US" &&
-                (v.name.includes("Female") ||
-                 v.name.includes("Google") ||
-                 v.name.includes("Samantha") ||
-                 v.name.includes("Jenny"))
-            );
-            if (preferred) uttr.voice = preferred;
-
-            speechSynthesis.speak(uttr);
-        }
-
         </script>
     </body>
     </html>
