@@ -131,6 +131,30 @@ URL: {url}
 
 
 # -----------------------------
+# 英語要約 → 日本語要約（Azure Translator）
+# -----------------------------
+@app.get("/tools/summary_ja")
+def summary_ja(text: str):
+    try:
+        headers = {
+            "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
+            "Ocp-Apim-Subscription-Region": "japanwest",
+            "Content-Type": "application/json"
+        }
+
+        body = [{"text": text}]
+        base = TRANSLATOR_ENDPOINT.rstrip("/")
+        url = f"{base}/translate?api-version=3.0&to=ja"
+
+        res = requests.post(url, headers=headers, json=body)
+        ja = res.json()[0]["translations"][0]["text"]
+        return {"ja_summary": ja}
+
+    except Exception as e:
+        return {"ja_summary": f"翻訳エラー: {e}"}
+
+
+# -----------------------------
 # ストック価格 API
 # -----------------------------
 @app.get("/tools/stock_price")
@@ -142,7 +166,7 @@ def stock_price(symbol: str):
 
 
 # -----------------------------
-# UI（翻訳 + 要約 + 音声）
+# UI（翻訳 + 要約 + 日本語要約 + 音声）
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -257,6 +281,7 @@ async def home():
 
                         <div id="ja_${index}" class="ja"></div>
                         <div id="summary_${index}" class="ja"></div>
+                        <div id="summary_ja_${index}" class="ja"></div>
                     </div>
                 `;
                 index++;
@@ -296,19 +321,26 @@ async def home():
         async function showSummary(i) {
             const url = document.getElementById("title_" + i).href;
 
+            // ① 英語要約
             const api = `/tools/summary?url=` + encodeURIComponent(url);
             const res = await fetch(api);
             const data = await res.json();
-
             const text = data.summary;
 
             document.getElementById("summary_" + i).innerText = text;
 
+            // ② 日本語要約
+            const api2 = `/tools/summary_ja?text=` + encodeURIComponent(text);
+            const res2 = await fetch(api2);
+            const data2 = await res2.json();
+
+            document.getElementById("summary_ja_" + i).innerText = data2.ja_summary;
+
+            // ③ 英語要約を読み上げ
             const utter = new SpeechSynthesisUtterance(text);
             utter.lang = "en-US";
             utter.rate = 1.0;
             utter.pitch = 1.0;
-
             speechSynthesis.speak(utter);
         }
 
