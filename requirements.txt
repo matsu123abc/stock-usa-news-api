@@ -4,4 +4,5 @@ requests
 python-dotenv
 yfinance
 openai
+azure-cognitiveservices-speech
 

@@ -1,10 +1,12 @@
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 import requests
 import os
 import yfinance as yf
 from dotenv import load_dotenv
 from openai import AzureOpenAI
+import io
+import azure.cognitiveservices.speech as speechsdk
 
 load_dotenv()
 
@@ -18,6 +20,9 @@ AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
+
 client = AzureOpenAI(
     api_key=AZURE_OPENAI_KEY,
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -26,7 +31,7 @@ client = AzureOpenAI(
 
 
 # -----------------------------
-# 英語ニュース検索 API（5件に制限）
+# ニュース検索（SerpAPI）
 # -----------------------------
 @app.get("/tools/news")
 def get_news(keyword: str):
@@ -70,13 +75,11 @@ def get_news(keyword: str):
             "source": safe(item.get("source"))
         })
 
-    articles = articles[:5]
-
-    return {"keyword": keyword, "count": len(articles), "articles": articles}
+    return {"articles": articles[:5]}
 
 
 # -----------------------------
-# 記事URLから英語要約（Azure OpenAI）
+# 英語要約（Azure OpenAI）
 # -----------------------------
 @app.get("/tools/summary")
 def summary(url: str):
@@ -87,47 +90,64 @@ and summarize it in **5–7 lines of English** for an investor audience.
 - Remove ads, menus, and irrelevant text
 - Keep only the core news content
 - Output in English only
-- No bullet points, just a concise paragraph
+- No bullet points
 
 URL: {url}
 """
 
-    try:
-        res = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
-        )
+    res = client.chat.completions.create(
+        model=AZURE_OPENAI_DEPLOYMENT,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2
+    )
 
-        text = res.choices[0].message.content
-        return {"summary": text}
-
-    except Exception as e:
-        return {"summary": f"Summary error: {e}"}
+    text = res.choices[0].message.content
+    return {"summary": text}
 
 
 # -----------------------------
-# 英語要約 → 日本語要約（Azure Translator）
+# 日本語要約（Azure Translator）
 # -----------------------------
 @app.get("/tools/summary_ja")
 def summary_ja(text: str):
-    try:
-        headers = {
-            "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
-            "Ocp-Apim-Subscription-Region": "japanwest",
-            "Content-Type": "application/json"
-        }
+    headers = {
+        "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
+        "Ocp-Apim-Subscription-Region": "japanwest",
+        "Content-Type": "application/json"
+    }
 
-        body = [{"text": text}]
-        base = TRANSLATOR_ENDPOINT.rstrip("/")
-        url = f"{base}/translate?api-version=3.0&to=ja"
+    body = [{"text": text}]
+    base = TRANSLATOR_ENDPOINT.rstrip("/")
+    url = f"{base}/translate?api-version=3.0&to=ja"
 
-        res = requests.post(url, headers=headers, json=body)
-        ja = res.json()[0]["translations"][0]["text"]
-        return {"ja_summary": ja}
+    res = requests.post(url, headers=headers, json=body)
+    ja = res.json()[0]["translations"][0]["text"]
+    return {"ja_summary": ja}
 
-    except Exception as e:
-        return {"ja_summary": f"翻訳エラー: {e}"}
+
+# -----------------------------
+# JennyNeural 音声生成（Azure Speech）
+# -----------------------------
+@app.post("/tools/speech_jenny")
+def speech_jenny(text: str):
+    speech_config = speechsdk.SpeechConfig(
+        subscription=AZURE_SPEECH_KEY,
+        region=AZURE_SPEECH_REGION
+    )
+
+    speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+
+    synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config,
+        audio_config=None
+    )
+
+    result = synthesizer.speak_text_async(text).get()
+
+    return StreamingResponse(
+        io.BytesIO(result.audio_data),
+        media_type="audio/mpeg"
+    )
 
 
 # -----------------------------
@@ -141,78 +161,29 @@ async def home():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
         <style>
-        @media screen and (orientation: portrait) {
-            body {
-                font-size: 22px;
-                line-height: 1.6;
-                padding: 20px;
-            }
-            h2 {
-                font-size: 26px;
-                text-align: center;
-            }
-            input {
-                font-size: 22px;
-                padding: 14px;
-                width: 100%;
-            }
-            button {
-                font-size: 22px;
-                padding: 14px;
-                border-radius: 10px;
-                margin-top: 10px;
-                width: 100%;
-            }
-            .ticker-btn {
-                width: 48%;
-                background: #e8e8e8;
-            }
-            .card {
-                font-size: 20px;
-                padding: 18px;
-                margin-top: 20px;
-                border-radius: 12px;
-                background: #f2f2f2;
-            }
-            a {
-                font-size: 22px;
-                font-weight: bold;
-            }
-            .ja {
-                margin-top: 10px;
-                padding: 10px;
-                background: #fff7d1;
-                border-radius: 8px;
-                font-size: 20px;
-            }
-        }
+        body { font-size: 22px; padding: 20px; line-height: 1.6; }
+        .ticker-btn { width: 48%; padding: 14px; margin: 5px; font-size: 22px; }
+        .card { background:#f2f2f2; padding:18px; margin-top:20px; border-radius:12px; }
+        .ja { background:#fff7d1; padding:10px; border-radius:8px; margin-top:10px; }
+        button { width:100%; padding:14px; font-size:22px; margin-top:10px; }
         </style>
     </head>
 
     <body>
         <h2>USA Stock News</h2>
 
-        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
+        <div style="display:flex; flex-wrap:wrap;">
             <button class="ticker-btn" onclick="setTicker('NVDA')">NVIDIA</button>
             <button class="ticker-btn" onclick="setTicker('AMD')">AMD</button>
             <button class="ticker-btn" onclick="setTicker('AI')">C3AI</button>
             <button class="ticker-btn" onclick="setTicker('INTC')">Intel</button>
             <button class="ticker-btn" onclick="setTicker('TSLA')">Tesla</button>
-            <button class="ticker-btn" onclick="setTicker('PFE')">Pfizer</button>
             <button class="ticker-btn" onclick="setTicker('QCOM')">Qualcomm</button>
-            <button class="ticker-btn" onclick="setTicker('AMZN')">Amazon</button>
             <button class="ticker-btn" onclick="setTicker('MSFT')">Microsoft</button>
-            <button class="ticker-btn" onclick="setTicker('GOOG')">Google</button>
             <button class="ticker-btn" onclick="setTicker('AAPL')">Apple</button>
-            <button class="ticker-btn" onclick="setTicker('JNJ')">Johnson & Johnson</button>
-            <button class="ticker-btn" onclick="setTicker('SOLV')">Solvay</button>
-            <button class="ticker-btn" onclick="setTicker('MMM')">3M</button>
-            <button class="ticker-btn" onclick="setTicker('VZ')">Verizon</button>
-            <button class="ticker-btn" onclick="setTicker('XOM')">ExxonMobil</button>
-            <button class="ticker-btn" onclick="setTicker('T')">AT&T</button>
         </div>
 
-        <input id="ticker" placeholder="例: QCOM, AAPL, MSFT">
+        <input id="ticker" placeholder="例: NVDA, MSFT, AAPL">
         <button onclick="search()">ニュース検索</button>
 
         <div id="result"></div>
@@ -226,29 +197,28 @@ async def home():
 
         async function search() {
             const t = document.getElementById("ticker").value;
-            const url = `/tools/news?keyword=${t}`;
-            const res = await fetch(url);
+            const res = await fetch(`/tools/news?keyword=${t}`);
             const data = await res.json();
 
-            let html = "<h3>検索結果</h3>";
-            let index = 0;
+            let html = "";
+            let i = 0;
 
             for (const n of data.articles) {
                 html += `
                     <div class="card">
-                        <a id="title_${index}" href="${n.link}" target="_blank">${n.title}</a><br>
-                        <small>${n.source}</small><br>
+                        <a id="title_${i}" href="${n.link}" target="_blank">${n.title}</a><br>
+                        <small>${n.source}</small>
+                        <p id="eng_${i}">${n.snippet}</p>
 
-                        <p id="eng_${index}">${n.snippet}</p>
+                        <button onclick="showSummary(${i})">要約</button>
 
-                        <button onclick="showSummary(${index})">要約</button>
-
-                        <div id="summary_${index}" class="ja"></div>
-                        <div id="summary_ja_${index}" class="ja"></div>
+                        <div id="summary_${i}" class="ja"></div>
+                        <div id="summary_ja_${i}" class="ja"></div>
                     </div>
                 `;
-                index++;
+                i++;
             }
+
             document.getElementById("result").innerHTML = html;
         }
 
@@ -256,26 +226,24 @@ async def home():
             const url = document.getElementById("title_" + i).href;
 
             // ① 英語要約
-            const api = `/tools/summary?url=` + encodeURIComponent(url);
-            const res = await fetch(api);
+            const res = await fetch(`/tools/summary?url=` + encodeURIComponent(url));
             const data = await res.json();
             const text = data.summary;
-
             document.getElementById("summary_" + i).innerText = text;
 
             // ② 日本語要約
-            const api2 = `/tools/summary_ja?text=` + encodeURIComponent(text);
-            const res2 = await fetch(api2);
+            const res2 = await fetch(`/tools/summary_ja?text=` + encodeURIComponent(text));
             const data2 = await res2.json();
-
             document.getElementById("summary_ja_" + i).innerText = data2.ja_summary;
 
-            // ③ 英語要約を読み上げ
-            const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = "en-US";
-            utter.rate = 1.0;
-            utter.pitch = 1.0;
-            speechSynthesis.speak(utter);
+            // ③ JennyNeural 音声再生
+            const audioRes = await fetch("/tools/speech_jenny?text=" + encodeURIComponent(text), {
+                method: "POST"
+            });
+
+            const blob = await audioRes.blob();
+            const audioURL = URL.createObjectURL(blob);
+            new Audio(audioURL).play();
         }
 
         </script>
