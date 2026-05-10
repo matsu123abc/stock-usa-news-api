@@ -76,31 +76,7 @@ def get_news(keyword: str):
 
 
 # -----------------------------
-# 翻訳 API（Azure Translator）
-# -----------------------------
-@app.get("/tools/translate")
-def translate(text: str):
-    try:
-        headers = {
-            "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
-            "Ocp-Apim-Subscription-Region": "japanwest",
-            "Content-Type": "application/json"
-        }
-
-        body = [{"text": text}]
-        base = TRANSLATOR_ENDPOINT.rstrip("/")
-        url = f"{base}/translate?api-version=3.0&to=ja"
-
-        res = requests.post(url, headers=headers, json=body)
-        ja = res.json()[0]["translations"][0]["text"]
-        return {"ja": ja}
-
-    except Exception:
-        return {"ja": "翻訳エラー"}
-
-
-# -----------------------------
-# 記事URLから英語要約を生成（Azure OpenAI）
+# 記事URLから英語要約（Azure OpenAI）
 # -----------------------------
 @app.get("/tools/summary")
 def summary(url: str):
@@ -155,18 +131,7 @@ def summary_ja(text: str):
 
 
 # -----------------------------
-# ストック価格 API
-# -----------------------------
-@app.get("/tools/stock_price")
-def stock_price(symbol: str):
-    ticker = yf.Ticker(symbol)
-    data = ticker.history(period="1d")
-    price = float(data["Close"].iloc[-1])
-    return {"symbol": symbol, "price": price, "currency": "USD"}
-
-
-# -----------------------------
-# UI（翻訳 + 要約 + 日本語要約 + 音声）
+# UI（要約ボタンだけ）
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -196,6 +161,7 @@ async def home():
                 padding: 14px;
                 border-radius: 10px;
                 margin-top: 10px;
+                width: 100%;
             }
             .ticker-btn {
                 width: 48%;
@@ -275,11 +241,8 @@ async def home():
 
                         <p id="eng_${index}">${n.snippet}</p>
 
-                        <button onclick="translateText(${index})">翻訳</button>
-                        <button onclick="speak(${index})">音声</button>
                         <button onclick="showSummary(${index})">要約</button>
 
-                        <div id="ja_${index}" class="ja"></div>
                         <div id="summary_${index}" class="ja"></div>
                         <div id="summary_ja_${index}" class="ja"></div>
                     </div>
@@ -287,35 +250,6 @@ async def home():
                 index++;
             }
             document.getElementById("result").innerHTML = html;
-        }
-
-        async function translateText(i) {
-            let eng = document.getElementById("eng_" + i).innerText;
-
-            if (!eng || eng.trim() === "") {
-                eng = document.getElementById("title_" + i).innerText;
-            }
-
-            const url = `/tools/translate?text=` + encodeURIComponent(eng);
-            const res = await fetch(url);
-            const data = await res.json();
-
-            document.getElementById("ja_" + i).innerHTML = data.ja;
-        }
-
-        function speak(i) {
-            let eng = document.getElementById("eng_" + i).innerText;
-
-            if (!eng || eng.trim() === "") {
-                eng = document.getElementById("title_" + i).innerText;
-            }
-
-            const utter = new SpeechSynthesisUtterance(eng);
-            utter.lang = "en-US";
-            utter.rate = 1.0;
-            utter.pitch = 1.0;
-
-            speechSynthesis.speak(utter);
         }
 
         async function showSummary(i) {
