@@ -89,6 +89,7 @@ def extract(url: str):
         html = requests.get(url, headers=headers, timeout=10).text
         soup = BeautifulSoup(html, "html.parser")
 
+        # ① よくある記事本文の候補
         candidates = [
             {"tag": "article"},
             {"tag": "div", "class": "article-body"},
@@ -101,6 +102,7 @@ def extract(url: str):
 
         text = ""
 
+        # ② 候補タグから抽出
         for c in candidates:
             tag = c.get("tag")
             cls = c.get("class")
@@ -109,15 +111,25 @@ def extract(url: str):
                 text = found.get_text(separator="\n")
                 break
 
-        if not text:
+        # ③ fallback：pタグをすべて抽出（強化版）
+        if not text or len(text) < 200:
             ps = soup.find_all("p")
             text = "\n".join([p.get_text() for p in ps])
 
-        return {"content": text.strip()}
+        # ④ fallback2：divタグからも抽出（Zacks / Yahoo 対策）
+        if len(text) < 200:
+            divs = soup.find_all("div")
+            text = "\n".join([d.get_text() for d in divs])
+
+        # ⑤ ノイズ除去
+        text = text.replace("Advertisement", "")
+        text = text.replace("ad", "")
+        text = text.strip()
+
+        return {"content": text}
 
     except Exception as e:
         return {"content": f"Extract error: {e}"}
-
 
 # -----------------------------
 # 英語要約（本文入力）
