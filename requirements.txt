@@ -5,5 +5,5 @@ python-dotenv
 yfinance
 openai
 azure-cognitiveservices-speech
-beautifulsoup4
+
 

@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from openai import AzureOpenAI
 import io
 import azure.cognitiveservices.speech as speechsdk
-from bs4 import BeautifulSoup
 
 load_dotenv()
 
@@ -80,68 +79,20 @@ def get_news(keyword: str):
 
 
 # -----------------------------
-# 本文スクレイピング
+# 英語要約（Azure OpenAI）
 # -----------------------------
-@app.get("/tools/extract")
-def extract(url: str):
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        html = requests.get(url, headers=headers, timeout=10).text
-        soup = BeautifulSoup(html, "html.parser")
-
-        # ① よくある記事本文の候補
-        candidates = [
-            {"tag": "article"},
-            {"tag": "div", "class": "article-body"},
-            {"tag": "div", "class": "caas-body"},
-            {"tag": "div", "class": "story-content"},
-            {"tag": "div", "class": "post-content"},
-            {"tag": "div", "class": "main-content"},
-            {"tag": "section", "class": "article-content"},
-        ]
-
-        text = ""
-
-        # ② 候補タグから抽出
-        for c in candidates:
-            tag = c.get("tag")
-            cls = c.get("class")
-            found = soup.find(tag, class_=cls) if cls else soup.find(tag)
-            if found:
-                text = found.get_text(separator="\n")
-                break
-
-        # ③ fallback：pタグをすべて抽出（強化版）
-        if not text or len(text) < 200:
-            ps = soup.find_all("p")
-            text = "\n".join([p.get_text() for p in ps])
-
-        # ④ fallback2：divタグからも抽出（Zacks / Yahoo 対策）
-        if len(text) < 200:
-            divs = soup.find_all("div")
-            text = "\n".join([d.get_text() for d in divs])
-
-        # ⑤ ノイズ除去
-        text = text.replace("Advertisement", "")
-        text = text.replace("ad", "")
-        text = text.strip()
-
-        return {"content": text}
-
-    except Exception as e:
-        return {"content": f"Extract error: {e}"}
-
-# -----------------------------
-# 英語要約（本文入力）
-# -----------------------------
-@app.post("/tools/summary_text")
-def summary_text(text: str):
+@app.get("/tools/summary")
+def summary(url: str):
     prompt = f"""
-Summarize the following news article in 5–7 lines of English
-for an investor audience.
+Extract the main content from the following news article URL,
+and summarize it in **5–7 lines of English** for an investor audience.
 
-Article:
-{text}
+- Remove ads, menus, and irrelevant text
+- Keep only the core news content
+- Output in English only
+- No bullet points
+
+URL: {url}
 """
 
     res = client.chat.completions.create(
@@ -150,7 +101,8 @@ Article:
         temperature=0.2
     )
 
-    return {"summary": res.choices[0].message.content}
+    text = res.choices[0].message.content
+    return {"summary": text}
 
 
 # -----------------------------
@@ -174,7 +126,7 @@ def summary_ja(text: str):
 
 
 # -----------------------------
-# JennyNeural 音声生成
+# JennyNeural 音声生成（Azure Speech）
 # -----------------------------
 @app.post("/tools/speech_jenny")
 def speech_jenny(text: str):
@@ -226,9 +178,18 @@ async def home():
             <button class="ticker-btn" onclick="setTicker('AI')">C3AI</button>
             <button class="ticker-btn" onclick="setTicker('INTC')">Intel</button>
             <button class="ticker-btn" onclick="setTicker('TSLA')">Tesla</button>
+            <button class="ticker-btn" onclick="setTicker('PFE')">Pfizer</button>
             <button class="ticker-btn" onclick="setTicker('QCOM')">Qualcomm</button>
+            <button class="ticker-btn" onclick="setTicker('AMZN')">Amazon</button>
             <button class="ticker-btn" onclick="setTicker('MSFT')">Microsoft</button>
+            <button class="ticker-btn" onclick="setTicker('GOOG')">Google</button>
             <button class="ticker-btn" onclick="setTicker('AAPL')">Apple</button>
+            <button class="ticker-btn" onclick="setTicker('JNJ')">Johnson & Johnson</button>
+            <button class="ticker-btn" onclick="setTicker('SOLV')">Solvay</button>
+            <button class="ticker-btn" onclick="setTicker('MMM')">3M</button>
+            <button class="ticker-btn" onclick="setTicker('VZ')">Verizon</button>
+            <button class="ticker-btn" onclick="setTicker('XOM')">ExxonMobil</button>
+            <button class="ticker-btn" onclick="setTicker('T')">AT&T</button>
         </div>
 
         <input id="ticker" placeholder="例: NVDA, MSFT, AAPL">
@@ -273,27 +234,18 @@ async def home():
         async function showSummary(i) {
             const url = document.getElementById("title_" + i).href;
 
-            // ① 本文抽出
-            const resExtract = await fetch(`/tools/extract?url=` + encodeURIComponent(url));
-            const dataExtract = await resExtract.json();
-            const content = dataExtract.content;
-
-            // ② 英語要約
-            const res = await fetch("/tools/summary_text", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({text: content})
-            });
+            // ① 英語要約
+            const res = await fetch(`/tools/summary?url=` + encodeURIComponent(url));
             const data = await res.json();
             const text = data.summary;
             document.getElementById("summary_" + i).innerText = text;
 
-            // ③ 日本語要約
+            // ② 日本語要約
             const res2 = await fetch(`/tools/summary_ja?text=` + encodeURIComponent(text));
             const data2 = await res2.json();
             document.getElementById("summary_ja_" + i).innerText = data2.ja_summary;
 
-            // ④ JennyNeural 音声再生
+            // ③ JennyNeural 音声再生
             const audioRes = await fetch("/tools/speech_jenny?text=" + encodeURIComponent(text), {
                 method: "POST"
             });
