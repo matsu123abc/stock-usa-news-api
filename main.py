@@ -162,32 +162,20 @@ class TranslateRequest(BaseModel):
 def translate_speech(req: TranslateRequest):
     text = req.text
 
-    system_prompt = """
-You are an English rewriting assistant.
-When the user inputs Japanese, output 5 English versions:
+    # ① 日本語翻訳（Azure Translator）
+    headers = {
+        "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
+        "Ocp-Apim-Subscription-Region": "japanwest",
+        "Content-Type": "application/json"
+    }
+    body = [{"text": text}]
+    base = TRANSLATOR_ENDPOINT.rstrip("/")
+    url = f"{base}/translate?api-version=3.0&to=ja"
 
-1. Casual English
-2. Simple English
-3. Natural native English
-4. Travel English
-5. Polite / business English
+    res = requests.post(url, headers=headers, json=body)
+    ja_text = res.json()[0]["translations"][0]["text"]
 
-Do NOT add explanations.
-"""
-
-    # ① 英語5文例を生成
-    res = client.chat.completions.create(
-        model=AZURE_OPENAI_DEPLOYMENT,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text}
-        ],
-        temperature=0.4
-    )
-
-    english_text = res.choices[0].message.content.strip()
-
-    # ② JennyNeural 音声生成
+    # ② 英語音声（JennyNeural）
     speech_config = speechsdk.SpeechConfig(
         subscription=AZURE_SPEECH_KEY,
         region=AZURE_SPEECH_REGION
@@ -197,12 +185,14 @@ Do NOT add explanations.
         speech_config=speech_config,
         audio_config=None
     )
-    result = synthesizer.speak_text_async(english_text).get()
+    result = synthesizer.speak_text_async(text).get()
 
     audio_base64 = base64.b64encode(result.audio_data).decode("utf-8")
 
-    return {"reply": english_text, "audio": audio_base64}
-
+    return {
+        "ja": ja_text,
+        "audio": audio_base64
+    }
 
 # -----------------------------
 # UI（翻訳モード追加）
@@ -326,8 +316,10 @@ async def home():
 
             const data = await res.json();
 
-            document.getElementById("trans_result").innerText = data.reply;
+            // 日本語翻訳を表示
+            document.getElementById("trans_result").innerText = data.ja;
 
+            // 英語音声を再生
             const audio = new Audio("data:audio/mp3;base64," + data.audio);
             audio.play();
         }
