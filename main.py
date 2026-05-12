@@ -153,8 +153,15 @@ def speech_jenny(text: str):
 # -----------------------------
 # 翻訳＋音声モード（新規追加）
 # -----------------------------
+from pydantic import BaseModel
+
+class TranslateRequest(BaseModel):
+    text: str
+
 @app.post("/tools/translate_speech")
-def translate_speech(text: str):
+def translate_speech(req: TranslateRequest):
+    text = req.text
+
     system_prompt = """
 You are an English rewriting assistant.
 When the user inputs Japanese, output 5 English versions:
