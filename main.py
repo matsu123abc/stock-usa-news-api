@@ -210,7 +210,13 @@ async def home():
         .card { background:#f2f2f2; padding:18px; margin-top:20px; border-radius:12px; }
         .ja { background:#fff7d1; padding:10px; border-radius:8px; margin-top:10px; }
         button { width:100%; padding:14px; font-size:22px; margin-top:10px; }
-        textarea { width:100%; font-size:22px; padding:10px; }
+        textarea {
+            width: 100%;
+            font-size: 22px;
+            padding: 10px;
+            line-height: 1.6;
+            resize: vertical;
+        }
         </style>
     </head>
 
@@ -243,9 +249,11 @@ async def home():
         <div id="result"></div>
 
         <hr>
+       
+        <h2>翻訳モード（英語音声＋日本語訳）</h2>
 
-        <h2>翻訳モード（英語5文例＋音声）</h2>
-        <textarea id="jp_text" rows="4" placeholder="日本語を入力してください"></textarea>
+        <textarea id="jp_text" rows="10" placeholder="英語本文をここに貼り付けてください"></textarea>
+       
         <button onclick="translateText()">翻訳</button>
 
         <div id="trans_result" class="card"></div>
