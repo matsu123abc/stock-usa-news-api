@@ -2,11 +2,11 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 import requests
 import os
-import yfinance as yf
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 import io
 import azure.cognitiveservices.speech as speechsdk
+import base64
 
 load_dotenv()
 
@@ -126,7 +126,7 @@ def summary_ja(text: str):
 
 
 # -----------------------------
-# JennyNeural 音声生成（Azure Speech）
+# JennyNeural 音声生成
 # -----------------------------
 @app.post("/tools/speech_jenny")
 def speech_jenny(text: str):
@@ -151,7 +151,54 @@ def speech_jenny(text: str):
 
 
 # -----------------------------
-# UI（要約ボタンだけ）
+# 翻訳＋音声モード（新規追加）
+# -----------------------------
+@app.post("/tools/translate_speech")
+def translate_speech(text: str):
+    system_prompt = """
+You are an English rewriting assistant.
+When the user inputs Japanese, output 5 English versions:
+
+1. Casual English
+2. Simple English
+3. Natural native English
+4. Travel English
+5. Polite / business English
+
+Do NOT add explanations.
+"""
+
+    # ① 英語5文例を生成
+    res = client.chat.completions.create(
+        model=AZURE_OPENAI_DEPLOYMENT,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text}
+        ],
+        temperature=0.4
+    )
+
+    english_text = res.choices[0].message.content.strip()
+
+    # ② JennyNeural 音声生成
+    speech_config = speechsdk.SpeechConfig(
+        subscription=AZURE_SPEECH_KEY,
+        region=AZURE_SPEECH_REGION
+    )
+    speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+    synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config,
+        audio_config=None
+    )
+    result = synthesizer.speak_text_async(english_text).get()
+
+    audio_base64 = base64.b64encode(result.audio_data).decode("utf-8")
+
+    return {"reply": english_text, "audio": audio_base64}
+
+
+# -----------------------------
+# UI（翻訳モード追加）
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -166,6 +213,7 @@ async def home():
         .card { background:#f2f2f2; padding:18px; margin-top:20px; border-radius:12px; }
         .ja { background:#fff7d1; padding:10px; border-radius:8px; margin-top:10px; }
         button { width:100%; padding:14px; font-size:22px; margin-top:10px; }
+        textarea { width:100%; font-size:22px; padding:10px; }
         </style>
     </head>
 
@@ -178,24 +226,23 @@ async def home():
             <button class="ticker-btn" onclick="setTicker('AI')">C3AI</button>
             <button class="ticker-btn" onclick="setTicker('INTC')">Intel</button>
             <button class="ticker-btn" onclick="setTicker('TSLA')">Tesla</button>
-            <button class="ticker-btn" onclick="setTicker('PFE')">Pfizer</button>
             <button class="ticker-btn" onclick="setTicker('QCOM')">Qualcomm</button>
-            <button class="ticker-btn" onclick="setTicker('AMZN')">Amazon</button>
             <button class="ticker-btn" onclick="setTicker('MSFT')">Microsoft</button>
-            <button class="ticker-btn" onclick="setTicker('GOOG')">Google</button>
             <button class="ticker-btn" onclick="setTicker('AAPL')">Apple</button>
-            <button class="ticker-btn" onclick="setTicker('JNJ')">Johnson & Johnson</button>
-            <button class="ticker-btn" onclick="setTicker('SOLV')">Solvay</button>
-            <button class="ticker-btn" onclick="setTicker('MMM')">3M</button>
-            <button class="ticker-btn" onclick="setTicker('VZ')">Verizon</button>
-            <button class="ticker-btn" onclick="setTicker('XOM')">ExxonMobil</button>
-            <button class="ticker-btn" onclick="setTicker('T')">AT&T</button>
         </div>
 
         <input id="ticker" placeholder="例: NVDA, MSFT, AAPL">
         <button onclick="search()">ニュース検索</button>
 
         <div id="result"></div>
+
+        <hr>
+
+        <h2>翻訳モード（英語5文例＋音声）</h2>
+        <textarea id="jp_text" rows="4" placeholder="日本語を入力してください"></textarea>
+        <button onclick="translateText()">翻訳</button>
+
+        <div id="trans_result" class="card"></div>
 
         <script>
 
@@ -234,18 +281,15 @@ async def home():
         async function showSummary(i) {
             const url = document.getElementById("title_" + i).href;
 
-            // ① 英語要約
             const res = await fetch(`/tools/summary?url=` + encodeURIComponent(url));
             const data = await res.json();
             const text = data.summary;
             document.getElementById("summary_" + i).innerText = text;
 
-            // ② 日本語要約
             const res2 = await fetch(`/tools/summary_ja?text=` + encodeURIComponent(text));
             const data2 = await res2.json();
             document.getElementById("summary_ja_" + i).innerText = data2.ja_summary;
 
-            // ③ JennyNeural 音声再生
             const audioRes = await fetch("/tools/speech_jenny?text=" + encodeURIComponent(text), {
                 method: "POST"
             });
@@ -253,6 +297,23 @@ async def home():
             const blob = await audioRes.blob();
             const audioURL = URL.createObjectURL(blob);
             new Audio(audioURL).play();
+        }
+
+        async function translateText() {
+            const text = document.getElementById("jp_text").value;
+
+            const res = await fetch("/tools/translate_speech", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({text: text})
+            });
+
+            const data = await res.json();
+
+            document.getElementById("trans_result").innerText = data.reply;
+
+            const audio = new Audio("data:audio/mp3;base64," + data.audio);
+            audio.play();
         }
 
         </script>
