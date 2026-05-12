@@ -233,9 +233,18 @@ async def home():
             <button class="ticker-btn" onclick="setTicker('AI')">C3AI</button>
             <button class="ticker-btn" onclick="setTicker('INTC')">Intel</button>
             <button class="ticker-btn" onclick="setTicker('TSLA')">Tesla</button>
+            <button class="ticker-btn" onclick="setTicker('PFE')">Pfizer</button>
             <button class="ticker-btn" onclick="setTicker('QCOM')">Qualcomm</button>
+            <button class="ticker-btn" onclick="setTicker('AMZN')">Amazon</button>
             <button class="ticker-btn" onclick="setTicker('MSFT')">Microsoft</button>
+            <button class="ticker-btn" onclick="setTicker('GOOG')">Google</button>
             <button class="ticker-btn" onclick="setTicker('AAPL')">Apple</button>
+            <button class="ticker-btn" onclick="setTicker('JNJ')">Johnson & Johnson</button>
+            <button class="ticker-btn" onclick="setTicker('SOLV')">Solvay</button>
+            <button class="ticker-btn" onclick="setTicker('MMM')">3M</button>
+            <button class="ticker-btn" onclick="setTicker('VZ')">Verizon</button>
+            <button class="ticker-btn" onclick="setTicker('XOM')">ExxonMobil</button>
+            <button class="ticker-btn" onclick="setTicker('T')">AT&T</button>
         </div>
 
         <input id="ticker" placeholder="例: NVDA, MSFT, AAPL">
